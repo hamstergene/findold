@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("directory", help="directory to scan for unused files", nargs='?')
+parser.add_argument("-a", "--age", help="minimum age in days to be considered unused (default 7 days)", type=int, default=7)
+parser.add_argument("-q", "--quiet", help="don't print file names", action="store_true")
+parser.add_argument("-qq", "--quieter", help="don't print file names and ignore errors", action="store_true")
+group = parser.add_mutually_exclusive_group()
+group.add_argument("-d", "--delete", help="delete unused items", action="store_true")
+group.add_argument("-m", "--move", help="Move unused item to this location. The location is relative to <directory>. It will be created if it does not exist.")
+parser.add_argument("-x", "--exclude", "--ignore", help="Ignore item with this name. May appear multiple times.", action='append')
+args = parser.parse_args()
+
+
+import os, os.path, time, sys, shutil
+path = args.directory if args.directory else "."
+destination = os.path.join(path, args.move) if args.move else None
+now = time.time()
+def graceful_stat(arg):
+    try:
+        return os.stat(arg)
+    except:
+        return None
+ignored_nodes = set((st.st_dev,st.st_ino) for st in map(graceful_stat, map(lambda n: os.path.join(path, n), args.exclude)) if st) if args.exclude else []
+def max_subitem_time(item_path, ref_times):
+    st = os.stat(item_path)
+    if (st.st_dev,st.st_ino) in ignored_nodes:
+        return False
+    ref_times[0] = max(ref_times[0], st.st_atime)
+    ref_times[1] = max(ref_times[1], st.st_mtime)
+    ref_times[2] = max(ref_times[2], st.st_ctime)
+    if hasattr(st, 'st_birthtime'):
+        ref_times[3] = max(ref_times[3], st.st_birthtime)
+    if os.path.isdir(item_path):
+        for subitem_name in os.listdir(item_path):
+            max_subitem_time(os.path.join(item_path, subitem_name), ref_times)
+    return True
+for item_name in os.listdir(path):
+    item_path = os.path.join(path, item_name)
+    try:
+        ref_times = [0,0,0,0]
+        if not max_subitem_time(item_path, ref_times):
+            continue
+        age = (now - max(ref_times)) / (24*60*60)
+        if age < args.age:
+            continue
+
+        if not (args.quieter or args.quiet):
+            print(item_path)
+
+        if args.delete:
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+            else:
+                os.unlink(item_path)
+        elif destination:
+            if not os.path.exists(destination):
+                os.makedirs(destination, mode=0o775)
+            suffix = 0
+            while True:
+                dst = os.path.join(destination, item_name) + (('_'+str(suffix)) if suffix else '')
+                if not os.path.exists(dst):
+                    break
+                suffix += 1
+            shutil.move(item_path, dst)
+
+    except Exception as ex:
+        if not args.quieter:
+            print(item_path, ':', ex, file=sys.stderr)
+
