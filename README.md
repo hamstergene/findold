@@ -1,8 +1,8 @@
-# `unused-files`: List and remove unused files
+# `find-unused`: Find and remove unused files
 
-A simple Python 3 script to find, move or delete files that were not used for a number of days.
+Find, move or delete files that were not accessed for a number of days.
 
-The script calculates the most recent of creation/change, modification, last access and inode creation (when available) times of a file, subtracts that from now, and considers the file unused when that difference is more than specified number of days. The file can be moved, deleted or simply listed then.
+The program calculates the most recent of creation/change, modification, last access and inode creation (when available) times of a file, subtracts that from now, and considers the file unused when that difference is more than specified number of days. The file can be moved, deleted or simply listed then.
 
 For directories, the most recent time of a directory and all its content (recursively) is used.
 
@@ -11,14 +11,16 @@ For directories, the most recent time of a directory and all its content (recurs
 A cron job to keep your `Downloads` folder clean:
 
     $ crontab -l
-    @weekly ~/bin/unused-files ~/Downloads -q --age 14 --move PendingDelete -x PendingDelete ; ~/bin/unused-files ~/Downloads/PendingDelete -q --age 64 --delete
+    @weekly ~/bin/find-unused ~/Downloads -q --age 14 --move PendingDelete -x PendingDelete ; ~/bin/find-unused ~/Downloads/PendingDelete -q --age 64 --delete
 
-Items older than 14 days get moved into `PendingDelete` subfolder and stay there for a couple of months, just in case you recall there was something that you need. Items older than 64 days are deleted forever. If you modify any of the files, or (if your OS does update last access time) simply open it, the file's life will be prolonged for another 14 days.
+Items older than 14 days are moved into `PendingDelete` subfolder and stay there for a couple of months, just in case you recall there was something that you need. Items older than 64 days are deleted forever. If you modify any of the files, or (if your OS does update last access time) simply open it, the file's life will be prolonged for another 14 days.
+
+As a consequence, the `Downloads` folder only contains the files downloaded recently, the new downloads are very easy to locate, and you never need to care about cleaning it.
 
 ## Usage
 
-    usage: unused-files [-h] [-a AGE] [-q] [-qq] [-d | -m MOVE] [-x EXCLUDE]
-                        [directory]
+    usage: find-unused [-h] [-a AGE] [-q] [-qq] [-d | -m MOVE] [-x EXCLUDE]
+                        directory
 
     positional arguments:
       directory             directory to scan for unused files

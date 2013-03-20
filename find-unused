@@ -2,7 +2,7 @@
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("directory", help="directory to scan for unused files", nargs='?')
+parser.add_argument("directory", help="directory to scan for unused files")
 parser.add_argument("-a", "--age", help="minimum age in days to be considered unused (default 7 days)", type=int, default=7)
 parser.add_argument("-q", "--quiet", help="don't print file names", action="store_true")
 parser.add_argument("-qq", "--quieter", help="don't print file names and ignore errors", action="store_true")
