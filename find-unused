@@ -4,12 +4,17 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("directory", help="directory to scan for unused files")
 parser.add_argument("-a", "--age", help="minimum age in days to be considered unused (default 7 days)", type=int, default=7)
-parser.add_argument("-q", "--quiet", help="don't print file names", action="store_true")
-parser.add_argument("-qq", "--quieter", help="don't print file names and ignore errors", action="store_true")
+
+group = parser.add_mutually_exclusive_group()
+group.add_argument("-v", "--verbose", help="print file names (default when neither -d nor -m specified)", action="store_true")
+group.add_argument("-q", "--quiet", help="silently ignore errors", action="store_true")
+
 group = parser.add_mutually_exclusive_group()
 group.add_argument("-d", "--delete", help="delete unused items", action="store_true")
 group.add_argument("-m", "--move", help="Move unused item to this location. The location is relative to <directory>. It will be created if it does not exist.")
-parser.add_argument("-x", "--exclude", "--ignore", help="Ignore item with this name. May appear multiple times.", action='append')
+
+parser.add_argument("-x", "--exclude", "--ignore", help="Ignore item with this name. May appear multiple times. The -m argument is always ignored automatically.", action='append')
+parser.add_argument("--dry", "--dry-run", help="Don't actually do anything, just print action to be taken", action="store_true")
 args = parser.parse_args()
 
 
@@ -22,7 +27,10 @@ def graceful_stat(arg):
         return os.stat(arg)
     except:
         return None
-ignored_nodes = set((st.st_dev,st.st_ino) for st in map(graceful_stat, map(lambda n: os.path.join(path, n), args.exclude)) if st) if args.exclude else []
+exclude = []
+if args.exclude: exclude.extend(args.exclude)
+if destination: exclude.append(destination)
+ignored_nodes = set((st.st_dev,st.st_ino) for st in map(graceful_stat, map(lambda n: os.path.join(path, n), exclude)) if st)
 def max_subitem_time(item_path, ref_times):
     st = os.stat(item_path)
     if (st.st_dev,st.st_ino) in ignored_nodes:
@@ -36,6 +44,12 @@ def max_subitem_time(item_path, ref_times):
         for subitem_name in os.listdir(item_path):
             max_subitem_time(os.path.join(item_path, subitem_name), ref_times)
     return True
+
+dry_exists = set()
+
+def shellescape(s):
+    return "'" + s.replace("'", r"'\''") + "'"
+
 for item_name in os.listdir(path):
     item_path = os.path.join(path, item_name)
     try:
@@ -46,26 +60,40 @@ for item_name in os.listdir(path):
         if age < args.age:
             continue
 
-        if not (args.quieter or args.quiet):
+        if args.verbose or not (args.delete or args.move):
             print(item_path)
 
         if args.delete:
             if os.path.isdir(item_path):
-                shutil.rmtree(item_path)
+                if args.dry:
+                    print("rm -r " + shellescape(item_path))
+                else:
+                    shutil.rmtree(item_path)
             else:
-                os.unlink(item_path)
+                if args.dry:
+                    print("rm " + shellescape(item_path))
+                else:
+                    os.unlink(item_path)
         elif destination:
-            if not os.path.exists(destination):
-                os.makedirs(destination, mode=0o775)
+            if not os.path.exists(destination) and not (destination in dry_exists):
+                if args.dry:
+                    print("mkdir -p " + shellescape(destination))
+                    dry_exists.add(destination)
+                else:
+                    os.makedirs(destination, mode=0o775)
             suffix = 0
             while True:
                 dst = os.path.join(destination, item_name) + (('_'+str(suffix)) if suffix else '')
-                if not os.path.exists(dst):
+                if not os.path.exists(dst) and not (dst in dry_exists):
                     break
                 suffix += 1
-            shutil.move(item_path, dst)
+            if args.dry:
+                print("mv " + shellescape(item_path) + " " + shellescape(dst))
+                dry_exists.add(dst)
+            else:
+                shutil.move(item_path, dst)
 
     except Exception as ex:
-        if not args.quieter:
+        if not args.quiet:
             print(item_path, ':', ex, file=sys.stderr)
 
