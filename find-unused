@@ -18,7 +18,7 @@ parser.add_argument("--dry", "--dry-run", help="Don't actually do anything, just
 args = parser.parse_args()
 
 
-import os, os.path, time, sys, shutil
+import os, os.path, time, sys, shutil, platform
 path = args.directory if args.directory else "."
 destination = os.path.join(path, args.move) if args.move else None
 now = time.time()
@@ -28,22 +28,22 @@ def graceful_stat(arg):
     except:
         return None
 exclude = []
+if platform.mac_ver()[0]: exclude.append(".DS_Store")
 if args.exclude: exclude.extend(args.exclude)
 if destination: exclude.append(destination)
 ignored_nodes = set((st.st_dev,st.st_ino) for st in map(graceful_stat, map(lambda n: os.path.join(path, n), exclude)) if st)
-def max_subitem_time(item_path, ref_times):
-    st = os.stat(item_path)
-    if (st.st_dev,st.st_ino) in ignored_nodes:
-        return False
-    ref_times[0] = max(ref_times[0], st.st_atime)
-    ref_times[1] = max(ref_times[1], st.st_mtime)
-    ref_times[2] = max(ref_times[2], st.st_ctime)
+def stat_touchtime(st):
+    rv = max(st.st_mtime, st.st_ctime)
     if hasattr(st, 'st_birthtime'):
-        ref_times[3] = max(ref_times[3], st.st_birthtime)
+        rv = max(rv, st.st_birthtime)
+    return rv
+def path_touchtime(item_path):
+    st = os.stat(item_path)
+    rv = stat_touchtime(st)
     if os.path.isdir(item_path):
         for subitem_name in os.listdir(item_path):
-            max_subitem_time(os.path.join(item_path, subitem_name), ref_times)
-    return True
+            rv = max(rv, path_touchtime(os.path.join(item_path, subitem_name)))
+    return rv
 
 dry_exists = set()
 
@@ -53,11 +53,14 @@ def shellescape(s):
 for item_name in os.listdir(path):
     item_path = os.path.join(path, item_name)
     try:
-        ref_times = [0,0,0,0]
-        if not max_subitem_time(item_path, ref_times):
+        st = os.stat(item_path)
+        if (st.st_dev,st.st_ino) in ignored_nodes:
             continue
-        age = (now - max(ref_times)) / (24*60*60)
+        touchtime = path_touchtime(item_path)
+        age = (now - touchtime) / (24*60*60)
         if age < args.age:
+            if args.dry:
+                print("# skip (age=%d) %s" % (age, item_path))
             continue
 
         if args.verbose or not (args.delete or args.move):
