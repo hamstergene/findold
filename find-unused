@@ -38,7 +38,10 @@ def stat_touchtime(st):
         rv = max(rv, st.st_birthtime)
     return rv
 def path_touchtime(item_path):
-    st = os.stat(item_path)
+    try:
+        st = os.stat(item_path)
+    except FileNotFoundError:
+        return 0
     rv = stat_touchtime(st)
     if os.path.isdir(item_path):
         for subitem_name in os.listdir(item_path):
@@ -67,7 +70,7 @@ for item_name in os.listdir(path):
             print(item_path)
 
         if args.delete:
-            if os.path.isdir(item_path):
+            if os.path.isdir(item_path) and not os.path.islink(item_path):
                 if args.dry:
                     print("rm -r " + shellescape(item_path))
                 else:
