@@ -59,6 +59,10 @@ for item_name in os.listdir(path):
         st = os.stat(item_path)
         if (st.st_dev,st.st_ino) in ignored_nodes:
             continue
+        if (os.getuid() != 0) and (st.st_uid != os.getuid()):
+            if args.dry:
+                print("# ignored (not owned): %s" % item_path)
+
         touchtime = path_touchtime(item_path)
         age = (now - touchtime) / (24*60*60)
         if age < args.age:
