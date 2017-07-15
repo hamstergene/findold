@@ -1,4 +1,4 @@
-# `find-unused`: Find and remove unused files
+# `findold`: Find and remove unused files
 
 Find, move or delete files that have not been accessed for a number of days.
 
@@ -13,7 +13,7 @@ Tested on OS X 10.8 and Linux Mint 14. Requires Python 3.
 A cron job to keep your `Downloads` folder clean:
 
     $ crontab -l
-    @weekly ~/bin/find-unused ~/Downloads -q --age 14 --move PendingDelete ; ~/bin/find-unused ~/Downloads/PendingDelete -q --age 64 --delete
+    @weekly ~/bin/findold ~/Downloads -q --age 14 --move PendingDelete ; ~/bin/findold ~/Downloads/PendingDelete -q --age 64 --delete
 
 Items older than 14 days are moved into `PendingDelete` subfolder and stay there for a couple of months, just in case you recall there was something that you need. Items older than 64 days are deleted forever. If you modify any of the files, or (if your OS does update last access time) simply open it, the file's life will be prolonged for another 14 days.
 
@@ -21,7 +21,7 @@ As a result, the `Downloads` folder only contains the files downloaded recently,
 
 ## Usage
 
-    usage: find-unused [-h] [-a AGE] [-v | -q] [-d | -m MOVE] [-x EXCLUDE] [--dry]
+    usage: findold [-h] [-a AGE] [-v | -q] [-d | -m MOVE] [-x EXCLUDE] [--dry]
                        directory
 
     positional arguments:
