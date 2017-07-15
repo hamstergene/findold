@@ -1,42 +1,67 @@
 #!/usr/bin/env python3
 
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument("directory", help="directory to scan for unused files")
-parser.add_argument("-a", "--age", help="minimum age in days to be considered unused (default 7 days)", type=int, default=7)
-
-group = parser.add_mutually_exclusive_group()
-group.add_argument("-v", "--verbose", help="print file names (default when neither -d nor -m specified)", action="store_true")
-group.add_argument("-q", "--quiet", help="silently ignore errors", action="store_true")
-
-group = parser.add_mutually_exclusive_group()
-group.add_argument("-d", "--delete", help="delete unused items", action="store_true")
-group.add_argument("-m", "--move", help="Move unused item to this location. The location is relative to <directory>. It will be created if it does not exist.")
-
-parser.add_argument("-x", "--exclude", "--ignore", help="Ignore item with this name. May appear multiple times. The -m argument is always ignored automatically.", action='append')
-parser.add_argument("--dry", "--dry-run", help="Don't actually do anything, just print action to be taken", action="store_true")
-args = parser.parse_args()
+import os, os.path, platform, shlex, shutil, sys, time
 
 
-import os, os.path, time, sys, shutil, platform
-path = args.directory if args.directory else "."
-destination = os.path.join(path, args.move) if args.move else None
-now = time.time()
-def graceful_stat(arg):
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("directory", help="directory to scan for unused files")
+    parser.add_argument("-a", "--age", help="minimum age in days to be considered unused (default 7 days)", type=int, default=7)
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-v", "--verbose", help="print file names (default when neither -d nor -m specified)", action="store_true")
+    group.add_argument("-q", "--quiet", help="silently ignore errors", action="store_true")
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-d", "--delete", help="delete unused items", action="store_true")
+    group.add_argument("-m", "--move", metavar="MOVE_TO", help="Move unused item to this location. The location is relative to <directory>. It will be created if it does not exist.")
+
+    parser.add_argument("-x", "--exclude", "--ignore", help="Ignore item with this name. May appear multiple times. The -m argument is always ignored automatically.", action='append')
+    parser.add_argument("-n", "--dry", "--dry-run", help="Don't actually do anything, just print action to be taken. The output will be a valid shell script.", action="store_true")
+
+    parser.add_argument("--version", action="version", version="%(prog)s 1.0")
+
+    if 1 == len(sys.argv):
+        parser.print_help()
+        sys.exit(1)
+
+    args = parser.parse_args()
+    verbosity = 1+int(args.verbose)-int(args.quiet) # 0, 1, or 2
+    exclusions=[".DS_Store", ".localized"]
+    if args.delete:
+        move_to = NEVERLAND
+    elif args.move:
+        move_to = args.move
+    else:
+        move_to = None
+    found_something = findold(args.directory if args.directory else ".", min_age=args.age, verbosity=verbosity, move_to=move_to, exclusions=exclusions, dry=args.dry)
+    return 0 if found_something else 1
+
+
+NEVERLAND = ":delete:"
+
+
+def stat_nothrow(arg):
     try:
         return os.stat(arg)
     except:
         return None
-exclude = []
-if platform.mac_ver()[0]: exclude.append(".DS_Store")
-if args.exclude: exclude.extend(args.exclude)
-if destination: exclude.append(destination)
-ignored_nodes = set((st.st_dev,st.st_ino) for st in map(graceful_stat, map(lambda n: os.path.join(path, n), exclude)) if st)
+
+
 def stat_touchtime(st):
     rv = max(st.st_mtime, st.st_ctime)
+
+    # in many cases access time is updated during simple directory listings, making it virtually useless
+    #if use_access_time:
+    #    rv = max(rv, st.st_atime)
+
     if hasattr(st, 'st_birthtime'):
         rv = max(rv, st.st_birthtime)
+
     return rv
+
+
 def path_touchtime(item_path):
     try:
         st = os.stat(item_path)
@@ -44,67 +69,106 @@ def path_touchtime(item_path):
         return 0
     rv = stat_touchtime(st)
     if os.path.isdir(item_path):
+        # intentionally non-recursive
         for subitem_name in os.listdir(item_path):
             rv = max(rv, path_touchtime(os.path.join(item_path, subitem_name)))
     return rv
 
-dry_exists = set()
 
-def shellescape(s):
-    return "'" + s.replace("'", r"'\''") + "'"
+def findold(directory, min_age=7, verbosity=1, move_to=None, exclusions=[], dry=False):
+    ignored_nodes = set((st.st_dev,st.st_ino) for st in map(stat_nothrow, map(lambda n: os.path.join(directory, n), exclusions)) if st)
 
-for item_name in os.listdir(path):
-    item_path = os.path.join(path, item_name)
-    try:
-        st = os.stat(item_path)
-        if (st.st_dev,st.st_ino) in ignored_nodes:
-            continue
-        if (os.getuid() != 0) and (st.st_uid != os.getuid()):
-            if args.dry:
-                print("# ignored (not owned): %s" % item_path)
-            continue
+    if move_to and move_to != NEVERLAND:
+        destination = os.path.join(directory, move_to)
+        st = stat_nothrow(destination)
+        if st:
+            ignored_nodes.add( (st.st_dev,st.st_ino) )
 
-        touchtime = path_touchtime(item_path)
-        age = (now - touchtime) / (24*60*60)
-        if age < args.age:
-            if args.dry:
-                print("# skip (age=%d) %s" % (age, item_path))
-            continue
+    now = time.time()
 
-        if args.verbose or not (args.delete or args.move):
-            print(item_path)
+    dry_exists = set()
+    rv = False
 
-        if args.delete:
-            if os.path.isdir(item_path) and not os.path.islink(item_path):
-                if args.dry:
-                    print("rm -r " + shellescape(item_path))
+    for item_name in os.listdir(directory):
+        item_path = os.path.join(directory, item_name)
+        try:
+            st = os.stat(item_path)
+            if (st.st_dev,st.st_ino) in ignored_nodes:
+                continue
+            if (os.getuid() != 0) and (st.st_uid != os.getuid()):
+                if dry:
+                    print("# ignored (not owned): %s" % item_path)
+                elif verbosity >= 2:
+                    print("-1", item_path, "--", "not owned")
+                continue
+
+            touchtime = path_touchtime(item_path)
+            age = (now - touchtime) / (24*60*60)
+            if age < min_age:
+                if verbosity == 2:
+                    if dry:
+                        print("# skip (age=%d) %s" % (age, item_path))
+                    else:
+                        print(age, item_path)
+                continue
+
+            rv = True
+
+            if move_to == NEVERLAND:
+                is_dir = os.path.isdir(item_path) and not os.path.islink(item_path)
+                if dry:
+                    if is_dir:
+                        print("rm -r " + shlex.quote(item_path))
+                    else:
+                        print("rm " + shlex.quote(item_path))
                 else:
-                    shutil.rmtree(item_path)
+                    if is_dir:
+                        shutil.rmtree(item_path)
+                    else:
+                        os.unlink(item_path)
+
+                    if verbosity == 1:
+                        print(item_path)
+                    elif verbosity == 2:
+                        print(age, item_path, "--", "DELETED")
+
+            elif move_to:
+                # only create on demand
+                if not os.path.exists(destination) and not (destination in dry_exists):
+                    if dry:
+                        print("mkdir -p " + shlex.quote(destination))
+                        dry_exists.add(destination)
+                    else:
+                        os.makedirs(destination, mode=0o775)
+
+                # append numeric suffixes if move target already exists in destination
+                suffix = 0
+                while True:
+                    dst = os.path.join(destination, item_name) + (('_'+str(suffix)) if suffix else '')
+                    if not os.path.exists(dst) and not (dst in dry_exists):
+                        break
+                    suffix += 1
+
+                if dry:
+                    print("mv " + shlex.quote(item_path) + " " + shlex.quote(dst))
+                    dry_exists.add(dst)
+                else:
+                    shutil.move(item_path, dst)
+
+                    if verbosity == 1:
+                        print(item_path, "->", dst)
+                    elif verbosity == 2:
+                        print(age, item_path, "->", dst)
             else:
-                if args.dry:
-                    print("rm " + shellescape(item_path))
-                else:
-                    os.unlink(item_path)
-        elif destination:
-            if not os.path.exists(destination) and not (destination in dry_exists):
-                if args.dry:
-                    print("mkdir -p " + shellescape(destination))
-                    dry_exists.add(destination)
-                else:
-                    os.makedirs(destination, mode=0o775)
-            suffix = 0
-            while True:
-                dst = os.path.join(destination, item_name) + (('_'+str(suffix)) if suffix else '')
-                if not os.path.exists(dst) and not (dst in dry_exists):
-                    break
-                suffix += 1
-            if args.dry:
-                print("mv " + shellescape(item_path) + " " + shellescape(dst))
-                dry_exists.add(dst)
-            else:
-                shutil.move(item_path, dst)
+                if verbosity == 1:
+                    print(item_path)
+                elif verbosity == 2:
+                    print(age, item_path, "--", "OLD")
 
-    except Exception as ex:
-        if not args.quiet:
-            print(item_path, ':', ex, file=sys.stderr)
+        except Exception as ex:
+            if verbosity >= 1:
+                print(item_path, ':', ex, file=sys.stderr)
+    return rv
 
+if __name__ == "__main__":
+    sys.exit(main())

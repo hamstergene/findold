@@ -6,7 +6,7 @@ The program calculates the most recent of creation/change, modification, last ac
 
 For directories, the most recent time of a directory and all its content (recursively) is used.
 
-Tested on OS X 10.8 and Linux Mint 14. Requires Python 3.
+Requires Python 3.
 
 ## Example
 
@@ -44,3 +44,10 @@ As a result, the `Downloads` folder only contains the files downloaded recently,
       --dry, --dry-run      Don't actually do anything, just print action to be
                             taken
 
+## Installation
+
+macOS via Homebrew:
+
+    brew install hamstergene/tap/findold
+
+Or you can just download and place the script wherever you like.
